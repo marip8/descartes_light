@@ -14,41 +14,44 @@ const static std::string RANKDIR_ATTR = "rankdir";
 
 namespace descartes_light
 {
+// Forward declare helper function from solver
 template <typename FloatType>
-inline SubGraph<FloatType> createDecoratedSubGraph(const BGLGraph<FloatType>& g)
+VertexDesc<FloatType> getLowestCostLastVertex(const SubGraph<FloatType>&);
+
+/**
+ * @brief Adds properties to a sub-graph and its children for display in a .dot file
+ */
+template <typename FloatType>
+inline void decorateSubGraph(SubGraph<FloatType>& g)
 {
-  SubGraph<FloatType> main;
-  boost::get_property(main, boost::graph_name) = "G";
+  // Set the top-level graph properties
+  boost::get_property(g, boost::graph_name) = "G";  
+  boost::get_property(g, boost::graph_vertex_attribute)[STYLE_ATTR] = "filled";
+  boost::get_property(g, boost::graph_graph_attribute)[RANKDIR_ATTR] = "LR";
 
-  std::map<long, SubGraph<FloatType>*> rung_subgraph_map;
+  // Add graph names to the children of the main graph
+  {
+    typename SubGraph<FloatType>::children_iterator start, end;
+    boost::tie(start, end) = g.children();
+    for (auto it = start; it != end; ++it)
+    {
+      std::stringstream ss;
+      ss << "cluster_" << std::distance(start, it);
+      boost::get_property(*it, boost::graph_name) = ss.str();
+    }
+  }
 
-  // Convert colors from enum to strings
+  // Add name and color properties to the graph vertices
   VertexIt<FloatType> start, end;
   boost::tie(start, end) = boost::vertices(g);
   for (auto it = start; it != end; ++it)
   {
-    const long rung_idx = g[*it].rung_idx;
-    if (rung_subgraph_map.find(rung_idx) == rung_subgraph_map.end())
-    {
-      // Create a new sub-graph for the rung
-      SubGraph<FloatType>& rung_subgraph = main.create_subgraph();
-      std::stringstream ss;
-      ss << "cluster_" << rung_idx;
-      boost::get_property(rung_subgraph, boost::graph_name) = ss.str();
-
-      rung_subgraph_map.emplace(rung_idx, &rung_subgraph);
-    }
-    SubGraph<FloatType>* rung_subgraph = rung_subgraph_map.at(rung_idx);
-
-    // Add a vertex to this new subgraph
-    auto v = boost::add_vertex(*rung_subgraph);
-
     std::stringstream name;
     name << std::setprecision(4) << "v" << *it << ": " << g[*it].distance;
-    boost::get(boost::vertex_attribute, *rung_subgraph)[v][LABEL_ATTR] = name.str();
+    boost::get(boost::vertex_attribute, g)[*it][LABEL_ATTR] = name.str();
 
     // Add colors
-    auto& color_prop = boost::get(boost::vertex_attribute, *rung_subgraph)[v][FILLCOLOR_ATTR];
+    auto& color_prop = boost::get(boost::vertex_attribute, g)[*it][FILLCOLOR_ATTR];
     switch (g[*it].color)
     {
       case boost::default_color_type::white_color:
@@ -68,66 +71,50 @@ inline SubGraph<FloatType> createDecoratedSubGraph(const BGLGraph<FloatType>& g)
     }
   }
 
-  // Add the edges to the subgraph
+  // Add properties to the edges of the subgraph
   auto weights = boost::get(boost::edge_weight, g);
 
   EdgeIt<FloatType> first, last;
   boost::tie(first, last) = boost::edges(g);
   for (auto it = first; it != last; ++it)
   {
-    VertexDesc<FloatType> source = boost::source(*it, g);
-    VertexDesc<FloatType> target = boost::target(*it, g);
-
-    bool added;
-    EdgeDesc<FloatType> e;
-    boost::tie(e, added) = boost::add_edge(source, target, weights[*it], main);
-
     std::stringstream ss;
     ss << std::setprecision(4) << weights[*it];
-    boost::get(boost::edge_attribute, main)[e][LABEL_ATTR] = ss.str();
+    boost::get(boost::edge_attribute, g)[*it][LABEL_ATTR] = ss.str();
   }
-
-  // Set th graph properties
-  boost::get_property(main, boost::graph_vertex_attribute)[STYLE_ATTR] = "filled";
-  boost::get_property(main, boost::graph_graph_attribute)[RANKDIR_ATTR] = "LR";
-
-  return main;
 }
 
 template <typename FloatType>
-void BGLLadderGraphSolver<FloatType>::writeGraph(const std::string& filename) const
+void BGLLadderGraphSolver<FloatType>::writeGraph(const std::string& filename)
 {
   std::ofstream file(filename);
   if (!file.good())
     throw std::runtime_error("Failed to open file '" + filename + "'");
 
-  boost::write_graphviz(file, createDecoratedSubGraph(graph_));
+  decorateSubGraph(graph_);
+  boost::write_graphviz(file, graph_);
 }
 
 template <typename FloatType>
-void BGLLadderGraphSolver<FloatType>::writeGraphWithPath(const std::string& filename) const
+void BGLLadderGraphSolver<FloatType>::writeGraphWithPath(const std::string& filename)
 {
   std::ofstream file(filename);
   if (!file.good())
     throw std::runtime_error("Failed to open file '" + filename + "'");
-
-  SubGraph<FloatType> sg = createDecoratedSubGraph(graph_);
 
   // Get the path through the graph
-  auto target = std::min_element(ladder_rungs_.back().begin(),
-                                 ladder_rungs_.back().end(),
-                                 [this](const VertexDesc<FloatType>& a, const VertexDesc<FloatType>& b) {
-                                   return graph_[a].distance < graph_[b].distance;
-                                 });
-  const std::vector<VertexDesc<FloatType>> path = reconstructPath(source_, *target);
+  const std::vector<VertexDesc<FloatType>> path = reconstructPath(source_, getLowestCostLastVertex(graph_));
+
+  // Decorate the graph with properties
+  decorateSubGraph(graph_);
 
   // Colorize the path
   for (const VertexDesc<FloatType>& v : path)
   {
-    boost::get(boost::vertex_attribute, sg)[v][FILLCOLOR_ATTR] = "green";
+    boost::get(boost::vertex_attribute, graph_)[v][FILLCOLOR_ATTR] = "green";
   }
 
-  boost::write_graphviz(file, sg);
+  boost::write_graphviz(file, graph_);
 }
 
 }  // namespace descartes_light

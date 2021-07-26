@@ -73,7 +73,11 @@ BuildStatus BGLLadderGraphSolver<FloatType>::buildImpl(
   BuildStatus status;
 
   // Build Vertices
-  ladder_rungs_.resize(trajectory.size());
+  std::vector<SubGraph<FloatType>*> subgraphs(trajectory.size());
+  for (std::size_t i = 0; i < trajectory.size(); ++i)
+  {
+    subgraphs[i] = &graph_.create_subgraph();
+  }
   long cnt = 0;
 
   using Clock = std::chrono::high_resolution_clock;
@@ -86,24 +90,31 @@ BuildStatus BGLLadderGraphSolver<FloatType>::buildImpl(
     {
       for (StateSample<FloatType>& sample : samples)
       {
-        VertexDesc<FloatType> vd;
         if (state_evaluators.empty())
         {
-          vd = boost::add_vertex(graph_);
+          // Add the new vertex at the global level
+          VertexDesc<FloatType> vd = boost::add_vertex(graph_);
           graph_[vd].sample = sample;
           graph_[vd].rung_idx = static_cast<long>(i);
-          ladder_rungs_[static_cast<size_t>(i)].push_back(vd);
+
+          // Add a vertex to the sub-graph for this rung
+          // Note: this call adds a new vertex with a default set of bundled properties that are not the same as those in the same named vertex at the global level
+          boost::add_vertex(vd, *subgraphs[static_cast<size_t>(i)]);
         }
         else
         {
           std::pair<bool, FloatType> results = state_evaluators[static_cast<size_t>(i)]->evaluate(*sample.state);
           if (results.first)
           {
+            // Add the new vertex at the global level
             sample.cost += results.second;
-            vd = boost::add_vertex(graph_);
+            VertexDesc<FloatType> vd = boost::add_vertex(graph_);
             graph_[vd].sample = sample;
             graph_[vd].rung_idx = static_cast<long>(i);
-            ladder_rungs_[static_cast<size_t>(i)].push_back(vd);
+
+            // Add a vertex to the sub-graph for this rung
+            // Note: this call adds a new vertex with a default set of bundled properties that are not the same as those in the same named vertex at the global level
+            boost::add_vertex(vd, *subgraphs[static_cast<size_t>(i)]);
           }
         }
       }
@@ -134,17 +145,22 @@ BuildStatus BGLLadderGraphSolver<FloatType>::buildImpl(
 #pragma omp parallel for num_threads(num_threads_)
   for (long i = 1; i < static_cast<long>(trajectory.size()); ++i)
   {
-    auto& from = ladder_rungs_[static_cast<size_t>(i) - 1];
-    const auto& to = ladder_rungs_[static_cast<size_t>(i)];
+    const SubGraph<FloatType>* from_subgraph = subgraphs[static_cast<size_t>(i) - 1];
+    const SubGraph<FloatType>* to_subgraph = subgraphs[static_cast<size_t>(i)];
 
     bool found = false;
-    for (long j = 0; j < static_cast<long>(from.size()); ++j)
+    VertexIt<FloatType> from, from_end;
+    boost::tie(from, from_end) = boost::vertices(*from_subgraph);
+    for (; from != from_end; ++from)
     {
-      const StateSample<FloatType> from_sample = graph_[from[static_cast<size_t>(j)]].sample;
-      for (long k = 0; k < static_cast<long>(to.size()); ++k)
+      const StateSample<FloatType>& from_sample = from_subgraph->operator[](*from).sample;
+
+      VertexIt<FloatType> to, to_end;
+      boost::tie(to, to_end) = boost::vertices(*to_subgraph);
+      for (; to != to_end; ++to)
       {
         // Consider the edge:
-        const StateSample<FloatType> to_sample = graph_[to[static_cast<size_t>(k)]].sample;
+        const StateSample<FloatType>& to_sample = to_subgraph->operator[](*to).sample;
         std::pair<bool, FloatType> results =
             edge_evaluators[static_cast<size_t>(i - 1)]->evaluate(*from_sample.state, *to_sample.state);
         if (results.first)
@@ -153,15 +169,11 @@ BuildStatus BGLLadderGraphSolver<FloatType>::buildImpl(
           if (i == 1)
           {
             // first edge captures first rung weights
-            boost::add_edge(from[static_cast<size_t>(j)],
-                            to[static_cast<size_t>(k)],
-                            from_sample.cost + results.second + to_sample.cost,
-                            graph_);
+            boost::add_edge(from_subgraph->local_to_global(*from), to_subgraph->local_to_global(*to), from_sample.cost + results.second + to_sample.cost, graph_);
           }
           else
           {
-            boost::add_edge(
-                from[static_cast<size_t>(j)], to[static_cast<size_t>(k)], results.second + to_sample.cost, graph_);
+            boost::add_edge(from_subgraph->local_to_global(*from), to_subgraph->local_to_global(*to), results.second + to_sample.cost, graph_);
           }
         }
       }
@@ -194,9 +206,12 @@ BuildStatus BGLLadderGraphSolver<FloatType>::buildImpl(
     auto arr = std::make_shared<State<FloatType>>();
     graph_[source_].sample = StateSample<FloatType>{ arr, static_cast<FloatType>(0.0) };
     graph_[source_].rung_idx = -1;
-    for (const VertexDesc<FloatType>& target : ladder_rungs_[0])
+
+    VertexIt<FloatType> start, end;
+    boost::tie(start, end) = boost::vertices(*subgraphs.front());
+    for (auto it = start; it != end; ++it)
     {
-      boost::add_edge(source_, target, static_cast<FloatType>(0.0), graph_);
+      boost::add_edge(source_, *it, static_cast<FloatType>(0.0), graph_);
     }
   }
 
@@ -253,6 +268,40 @@ BGLLadderGraphSolver<FloatType>::toStates(const std::vector<VertexDesc<FloatType
   return out;
 }
 
+/**
+ * @brief Helper function for finding global vertex descriptor of the lowest cost node in the last ladder sub-graph rung
+ */
+template <typename FloatType>
+VertexDesc<FloatType> getLowestCostLastVertex(const SubGraph<FloatType>& g)
+{
+  typename SubGraph<FloatType>::children_iterator first_rung, rung_end;
+  boost::tie(first_rung, rung_end) = g.children();
+
+  // The last rung is one before the end iterator
+  const SubGraph<FloatType>& last_rung = *(--rung_end);
+
+  // Get all of the local vertex descriptors from this rung
+  VertexIt<FloatType> start, end;
+  boost::tie(start, end) = boost::vertices(last_rung);
+
+  // Initialize the output and cost
+  VertexDesc<FloatType> target = last_rung.local_to_global(*start);
+  FloatType cost = std::numeric_limits<FloatType>::max();
+
+  for (auto it = start; it != end; ++it)
+  {
+    // Get the vertex from the global graph, not the local graph, since the global graph was the one that was searched
+    const VertexDesc<FloatType> vd = last_rung.local_to_global(*it);
+    if (g[vd].distance < cost)
+    {
+      cost = g[vd].distance;
+      target = vd;
+    }
+  }
+
+  return target;
+}
+
 template <typename FloatType>
 SearchResult<FloatType> BGLLadderGraphSolver<FloatType>::search()
 {
@@ -280,20 +329,13 @@ SearchResult<FloatType> BGLLadderGraphSolver<FloatType>::search()
                                  boost::default_dijkstra_visitor(),
                                  color_prop_map);
 
-  // Find lowest cost node in last rung
-  auto target = std::min_element(ladder_rungs_.back().begin(),
-                                 ladder_rungs_.back().end(),
-                                 [this](const VertexDesc<FloatType>& a, const VertexDesc<FloatType>& b) {
-                                   return graph_[a].distance < graph_[b].distance;
-                                 });
-
   SearchResult<FloatType> result;
 
   // Reconstruct the path from the predecesor map; remove the artificial start state
-  result.trajectory = toStates(reconstructPath(source_, *target));
+  VertexDesc<FloatType> target = getLowestCostLastVertex(graph_);
+  result.trajectory = toStates(reconstructPath(source_, target));
   result.trajectory.erase(result.trajectory.begin());
-
-  result.cost = graph_[*target].distance;
+  result.cost = graph_[target].distance;
 
   return result;
 }

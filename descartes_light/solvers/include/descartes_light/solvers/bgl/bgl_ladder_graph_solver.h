@@ -43,8 +43,8 @@ public:
 
   SearchResult<FloatType> search() override;
 
-  void writeGraph(const std::string& filename) const;
-  void writeGraphWithPath(const std::string& filename) const;
+  void writeGraph(const std::string& filename);
+  void writeGraphWithPath(const std::string& filename);
 
 private:
   std::vector<VertexDesc<FloatType>> reconstructPath(const VertexDesc<FloatType>& source,
@@ -53,10 +53,8 @@ private:
   std::vector<typename State<FloatType>::ConstPtr> toStates(const std::vector<VertexDesc<FloatType>>& path) const;
 
   unsigned num_threads_;
-  /** @brief Graph representation of the planning problem */
-  BGLGraph<FloatType> graph_;
-  /** @brief Ladder graph representation of the graph vertices, used for creating edge connections */
-  std::vector<std::vector<VertexDesc<FloatType>>> ladder_rungs_;
+  /** @brief Graph representation of the planning problem with sub-graphs as the ladder rungs */
+  SubGraph<FloatType> graph_;
   /** @brief Artificial source vertex with a zero-cost edge to all vertices in the first ladder rung. All searches
    * should start from this vertex */
   VertexDesc<FloatType> source_;
