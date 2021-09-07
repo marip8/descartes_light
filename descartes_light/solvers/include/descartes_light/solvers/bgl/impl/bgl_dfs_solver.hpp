@@ -40,11 +40,7 @@ static VertexDesc<FloatType> solveDFS(BGLGraph<FloatType>& graph,
 {
   predecessors.resize(boost::num_vertices(graph), std::numeric_limits<std::size_t>::max());
   auto color_prop_map = boost::get(&Vertex<FloatType>::color, graph);
-
-  // Create a visitor that combines the input visitors with a predecessor and cost recorder
-  auto visitor =
-      boost::make_dfs_visitor(std::make_pair(boost::record_predecessors(predecessors.data(), boost::on_tree_edge()),
-                                             std::make_pair(cost_recorder(), event_visitors)));
+  auto visitor = boost::make_dfs_visitor(event_visitors);
 
   try
   {
@@ -77,9 +73,14 @@ SearchResult<FloatType> BGLDepthFirstSVSESolver<FloatType, Visitors>::search()
   const auto& source_ = BGLSolverBase<FloatType, Visitors>::source_;
   auto& predecessors_ = BGLSolverBase<FloatType, Visitors>::predecessors_;
   const auto& ladder_rungs_ = BGLSolverBase<FloatType, Visitors>::ladder_rungs_;
-  const auto& event_visitors = BGLSolverBase<FloatType, Visitors>::event_visitors_;
+  const auto& event_visitors_ = BGLSolverBase<FloatType, Visitors>::event_visitors_;
 
-  const VertexDesc<FloatType> target = solveDFS(graph_, predecessors_, source_, event_visitors, ladder_rungs_);
+  // Create an event visitor that combines the internally specified visitors with ones that record predecessors and
+  // vertex costs (i.e. distances)
+  auto visitor = std::make_pair(boost::record_predecessors(predecessors.data(), boost::on_tree_edge()),
+                                std::make_pair(cost_recorder(), event_visitors_));
+
+  const VertexDesc<FloatType> target = solveDFS(graph_, predecessors_, source_, visitor, ladder_rungs_);
 
   SearchResult<FloatType> result;
 
@@ -103,10 +104,15 @@ SearchResult<FloatType> BGLDepthFirstSVDESolver<FloatType, Visitors>::search()
   const auto& ladder_rungs_ = BGLSolverBase<FloatType, Visitors>::ladder_rungs_;
   const auto& event_visitors_ = BGLSolverBase<FloatType, Visitors>::event_visitors_;
 
-  // Make a visitor that combines the specified event visitors with one that adds all edges dynamically
+  // Make a visitor that combines the internally specified event visitors with ones that add all edges dynamically and
+  // record predecessors and vertex costs (i.e. distances)
   const auto& edge_eval_ = BGLSolverBaseSVDE<FloatType, Visitors>::edge_eval_;
   auto visitor = std::make_pair(
-      add_all_edges_dynamically<FloatType, boost::on_discover_vertex>(edge_eval_, ladder_rungs_), event_visitors_);
+      boost::record_predecessors(predecessors.data(), boost::on_tree_edge()),
+      std::make_pair(
+          cost_recorder(),
+          std::make_pair(add_all_edges_dynamically<FloatType, boost::on_discover_vertex>(edge_eval_, ladder_rungs_),
+                         event_visitors_)));
 
   const VertexDesc<FloatType> target = solveDFS(graph_, predecessors_, source_, visitor, ladder_rungs_);
 
