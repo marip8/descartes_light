@@ -114,6 +114,8 @@ TYPED_TEST(NonOptimalSolverFixture, Solve)
 
   SearchResult<FloatType> result = solver->search();
   ASSERT_EQ(result.trajectory.size(), this->n_waypoints);
+  ASSERT_LT(result.cost, std::numeric_limits<FloatType>::max());
+  ASSERT_GT(result.cost, static_cast<FloatType>(0.0));
 }
 
 int main(int argc, char** argv)
