@@ -31,53 +31,95 @@ DESCARTES_IGNORE_WARNINGS_POP
 
 namespace descartes_light
 {
-template <typename FloatType>
-SearchResult<FloatType> DepthFirstSVDESolver<FloatType>::search()
+template <typename FloatType, typename Visitors>
+static VertexDesc<FloatType> solveDFS(BGLGraph<FloatType>& graph,
+                                      std::vector<VertexDesc<FloatType>>& predecessors,
+                                      const VertexDesc<FloatType>& source,
+                                      const Visitors& event_visitors,
+                                      const std::vector<std::vector<VertexDesc<FloatType>>>& ladder_rungs)
 {
-  SearchResult<FloatType> result;
+  predecessors.resize(boost::num_vertices(graph), std::numeric_limits<std::size_t>::max());
+  auto color_prop_map = boost::get(&Vertex<FloatType>::color, graph);
 
-  // Internal properties
-  auto& graph_ = BGLSolverBase<FloatType>::graph_;
-  const auto& source_ = BGLSolverBase<FloatType>::source_;
-  auto& predecessors_ = BGLSolverBase<FloatType>::predecessors_;
-  auto& ladder_rungs_ = BGLSolverBase<FloatType>::ladder_rungs_;
-  auto& edge_eval_ = BGLSolverBaseSVDE<FloatType>::edge_eval_;
-
-  result.cost = std::numeric_limits<FloatType>::max();
-  result.trajectory = {};
-
-  predecessors_.resize(boost::num_vertices(graph_), std::numeric_limits<std::size_t>::max());
-  std::vector<VertexDesc<FloatType>> dist_vec(boost::num_vertices(graph_), std::numeric_limits<std::size_t>::max());
-  auto color_prop_map = boost::get(&Vertex<FloatType>::color, graph_);
-
-  const long last_rung_idx = static_cast<long>(ladder_rungs_.size() - 1);
-  auto visitor = boost::make_dfs_visitor(std::make_pair(
-      early_terminator_discover<FloatType>(last_rung_idx),
-      std::make_pair(add_all_edges_dynamically<FloatType>(edge_eval_, ladder_rungs_),
-                     std::make_pair(boost::record_predecessors(predecessors_.data(), boost::on_tree_edge()),
-                                    cost_recorder<FloatType>()))));
+  // Create a visitor that combines the input visitors with a predecessor and cost recorder
+  auto visitor =
+      boost::make_dfs_visitor(std::make_pair(boost::record_predecessors(predecessors.data(), boost::on_tree_edge()),
+                                             std::make_pair(cost_recorder(), event_visitors)));
 
   try
   {
-    graph_[source_].distance = 0.0;
+    graph[source].distance = 0.0;
+    boost::depth_first_search(graph, visitor, color_prop_map, source);
 
-    boost::depth_first_search(graph_, visitor, color_prop_map, source_);
+    // In the case that the visitor does not throw the target vertex descriptor, find the lowest cost vertex in last
+    // rung of the ladder graph
+    auto target = std::min_element(ladder_rungs.back().begin(),
+                                   ladder_rungs.back().end(),
+                                   [&](const VertexDesc<FloatType>& a, const VertexDesc<FloatType>& b) {
+                                     return graph[a].distance < graph[b].distance;
+                                   });
+    if (target != ladder_rungs.back().end())
+      throw *target;
   }
   catch (const VertexDesc<FloatType>& target)
   {
-    // the source point is always the last vertex inthe vector
-    predecessors_[predecessors_.size() - 1] = predecessors_.size() - 1;
-    const auto valid_path = BGLSolverBase<FloatType>::reconstructPath(source_, target);
-    result.trajectory = BGLSolverBase<FloatType>::toStates(valid_path);
-
-    // remove empty start state
-    result.trajectory.erase(result.trajectory.begin());
-    result.cost = graph_[target].distance;
-
-    return result;
+    return target;
   }
 
   throw std::runtime_error("DFS search failed to encounter a vertex in the last rung of the plan graph");
+}
+
+template <typename FloatType, typename Visitors>
+SearchResult<FloatType> BGLDepthFirstSVSESolver<FloatType, Visitors>::search()
+{
+  // Internal properties
+  auto& graph_ = BGLSolverBase<FloatType, Visitors>::graph_;
+  const auto& source_ = BGLSolverBase<FloatType, Visitors>::source_;
+  auto& predecessors_ = BGLSolverBase<FloatType, Visitors>::predecessors_;
+  const auto& ladder_rungs_ = BGLSolverBase<FloatType, Visitors>::ladder_rungs_;
+  const auto& event_visitors = BGLSolverBase<FloatType, Visitors>::event_visitors_;
+
+  const VertexDesc<FloatType> target = solveDFS(graph_, predecessors_, source_, event_visitors, ladder_rungs_);
+
+  SearchResult<FloatType> result;
+
+  // Reconstruct the path from the predecesor map; remove the artificial start state
+  const auto vd_path = BGLSolverBase<FloatType, Visitors>::reconstructPath(source_, target);
+  result.trajectory = BGLSolverBase<FloatType, Visitors>::toStates(vd_path);
+  result.trajectory.erase(result.trajectory.begin());
+
+  result.cost = graph_[target].distance;
+
+  return result;
+}
+
+template <typename FloatType, typename Visitors>
+SearchResult<FloatType> BGLDepthFirstSVDESolver<FloatType, Visitors>::search()
+{
+  // Internal properties
+  auto& graph_ = BGLSolverBase<FloatType, Visitors>::graph_;
+  const auto& source_ = BGLSolverBase<FloatType, Visitors>::source_;
+  auto& predecessors_ = BGLSolverBase<FloatType, Visitors>::predecessors_;
+  const auto& ladder_rungs_ = BGLSolverBase<FloatType, Visitors>::ladder_rungs_;
+  const auto& event_visitors_ = BGLSolverBase<FloatType, Visitors>::event_visitors_;
+
+  // Make a visitor that combines the specified event visitors with one that adds all edges dynamically
+  const auto& edge_eval_ = BGLSolverBaseSVDE<FloatType, Visitors>::edge_eval_;
+  auto visitor = std::make_pair(
+      add_all_edges_dynamically<FloatType, boost::on_discover_vertex>(edge_eval_, ladder_rungs_), event_visitors_);
+
+  const VertexDesc<FloatType> target = solveDFS(graph_, predecessors_, source_, visitor, ladder_rungs_);
+
+  SearchResult<FloatType> result;
+
+  // Reconstruct the path from the predecesor map; remove the artificial start state
+  const auto vd_path = BGLSolverBase<FloatType, Visitors>::reconstructPath(source_, target);
+  result.trajectory = BGLSolverBase<FloatType, Visitors>::toStates(vd_path);
+  result.trajectory.erase(result.trajectory.begin());
+
+  result.cost = graph_[target].distance;
+
+  return result;
 }
 
 }  // namespace descartes_light
