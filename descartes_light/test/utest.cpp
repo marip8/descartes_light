@@ -87,15 +87,21 @@ class NonOptimalSolverFixture : public OptimalSolverFixture<SolverFactoryT>
 {
 };
 
-using NonOptimalImplementations =
-    ::testing::Types<SolverFactory<DepthFirstSVDESolverF>, SolverFactory<DepthFirstSVDESolverD>>;
+using NonOptimalImplementations = ::testing::Types<SolverFactory<BGLDepthFirstSVSESolverF>,
+                                                   SolverFactory<BGLDepthFirstSVSESolverD>,
+                                                   SolverFactory<BGLDepthFirstSVSESolver<float, boost::null_visitor>>,
+                                                   SolverFactory<BGLDepthFirstSVSESolver<double, boost::null_visitor>>,
+                                                   SolverFactory<BGLDepthFirstSVDESolverF>,
+                                                   SolverFactory<BGLDepthFirstSVDESolverD>,
+                                                   SolverFactory<BGLDepthFirstSVDESolver<float, boost::null_visitor>>,
+                                                   SolverFactory<BGLDepthFirstSVDESolver<double, boost::null_visitor>>>;
 
 TYPED_TEST_CASE(NonOptimalSolverFixture, NonOptimalImplementations);
 
 TYPED_TEST(NonOptimalSolverFixture, Solve)
 {
   using FloatType = typename TypeParam::FloatType;
-  typename Solver<FloatType>::Ptr solver = this->Factory.create();
+  typename Solver<FloatType>::Ptr solver = this->Factory.create(static_cast<long>(this->n_waypoints));
 
   // Build a graph where one sample for each waypoint is an all zero state; evaluate edges using the Euclidean distance
   // metric Since each waypoint has an all-zero state, the shortest path should be through these samples
