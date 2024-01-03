@@ -66,6 +66,24 @@ static void reportFailedVertices(const std::vector<std::size_t>& indices)
 
 namespace descartes_light
 {
+template<typename FloatType>
+float LadderGraphSolver<FloatType>::estimateGraphSize(const std::size_t dof, const std::size_t n_waypoints, const std::size_t samples_per_waypoint)
+{
+  // Each node is comprised of a state (n_dof * float size) and a cost (float size)
+  std::size_t node_size = dof * sizeof(FloatType) + sizeof(FloatType);
+  std::size_t nodes_bytes = n_waypoints * samples_per_waypoint * node_size;
+
+  // Each edge is comprised of a cost (float size) and an index (unsigned size)
+  std::size_t edge_size = sizeof(FloatType) + sizeof(unsigned);
+  std::size_t edges_bytes = (samples_per_waypoint * samples_per_waypoint) * (n_waypoints - 1) * edge_size;
+
+  // The DAG search "node" type is comprised of a distance (float) and a predecessor index (unsigned)
+  std::size_t dag_node_size = sizeof(FloatType) + sizeof(unsigned);
+  std::size_t dag_nodes_bytes = n_waypoints * samples_per_waypoint * dag_node_size;
+
+  return static_cast<float>(nodes_bytes + edges_bytes + dag_nodes_bytes) / std::pow(1024.0f, 2.0f);
+}
+
 template <typename FloatType>
 LadderGraphSolver<FloatType>::LadderGraphSolver(int num_threads) : num_threads_{ num_threads }
 {
@@ -156,6 +174,10 @@ BuildStatus LadderGraphSolver<FloatType>::buildImpl(
     for (std::size_t j = 0; j < from.nodes.size(); ++j)
     {
       auto& from_node = from.nodes[j];
+
+      // Reserve the maximum possible number of edges up front and shrink to fit when all have been added
+      from_node.edges.reserve(to.nodes.size());
+
       for (std::size_t k = 0; k < to.nodes.size(); ++k)
       {
         // Consider the edge:
@@ -169,10 +191,7 @@ BuildStatus LadderGraphSolver<FloatType>::buildImpl(
         }
       }
 
-      // Since we are using emplace_back (or push_back) it doubles the capacity everytime the
-      // capacity is reached so this could be huge when solving large ladder graph problems.
       // So shrink the capacity to fit
-      // @todo Should max possible size be reserved first
       from_node.edges.shrink_to_fit();
     }
 

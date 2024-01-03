@@ -13,6 +13,8 @@ DESCARTES_IGNORE_WARNINGS_PUSH
 #include <iostream>
 DESCARTES_IGNORE_WARNINGS_POP
 
+#include <gperftools/heap-profiler.h>
+
 using namespace descartes_light;
 
 /**
@@ -21,8 +23,9 @@ using namespace descartes_light;
 template <typename SolverT>
 void benchmark(const SolverFactory<SolverT>& factory)
 {
+  std::string name = boost::core::demangle(typeid(SolverT).name());
   std::cout << "\n==============================================" << std::endl;
-  std::cout << boost::core::demangle(typeid(SolverT).name()) << std::endl;
+  std::cout << name << std::endl;
   std::cout << "==============================================\n" << std::endl;
 
   using FloatType = typename SolverT::FloatT;
@@ -30,9 +33,9 @@ void benchmark(const SolverFactory<SolverT>& factory)
 
   // Parameterize the size of the planning problem in terms of the number of degrees of freedom, number of waypoints in
   // the problem, and number of samples per waypoint
-  const std::vector<std::size_t> v_dof{ 6, 8, 10 };
-  const std::vector<std::size_t> v_waypoints{ 10, 50, 100 };
-  const std::vector<std::size_t> v_samples{ 10, 50, 100 };
+  const std::vector<std::size_t> v_dof{ /*6, 8,*/ 10 };
+  const std::vector<std::size_t> v_waypoints{ /*10, 50,*/ 1000 };
+  const std::vector<std::size_t> v_samples{ /*10, 50,*/ 100 };
 
   const FloatType state_cost = static_cast<FloatType>(1.0);
 
@@ -47,6 +50,10 @@ void benchmark(const SolverFactory<SolverT>& factory)
     {
       for (std::size_t samples_per_wp : v_samples)
       {
+        std::stringstream ss;
+        ss << name << "_dof-" << dof << "_waypoints-" << n_waypoints << "_samples-" << samples_per_wp;
+        HeapProfilerStart(ss.str().c_str());
+
         // Create the waypoint samplers
         std::vector<typename WaypointSampler<FloatType>::ConstPtr> samplers =
             createSamplers<FloatType>(dof, n_waypoints, samples_per_wp, state_cost);
@@ -70,6 +77,9 @@ void benchmark(const SolverFactory<SolverT>& factory)
         std::cout << params << std::endl;
         std::cout << "\tGraph Build Time (s): " << graph_build_time << std::endl;
         std::cout << "\tGraph Search Time (s): " << graph_search_time << std::endl;
+
+        HeapProfilerDump("Finished");
+        HeapProfilerStop();
       }
     }
   }
@@ -81,37 +91,37 @@ int main(int, char**)
   benchmark(SolverFactory<LadderGraphSolverD>());
   benchmark(SolverFactory<LadderGraphSolverF>());
 
-  // BGL Dijkstra full search, static vertex static edge
-  benchmark(SolverFactory<BGLDijkstraSVSESolver<double, boost::null_visitor>>());
-  benchmark(SolverFactory<BGLDijkstraSVSESolver<float, boost::null_visitor>>());
+  // // BGL Dijkstra full search, static vertex static edge
+  // benchmark(SolverFactory<BGLDijkstraSVSESolver<double, boost::null_visitor>>());
+  // benchmark(SolverFactory<BGLDijkstraSVSESolver<float, boost::null_visitor>>());
 
-  // BGL Dijkstra early termination, static vertex static edge
-  benchmark(SolverFactory<BGLDijkstraSVSESolverD>());
-  benchmark(SolverFactory<BGLDijkstraSVSESolverF>());
+  // // BGL Dijkstra early termination, static vertex static edge
+  // benchmark(SolverFactory<BGLDijkstraSVSESolverD>());
+  // benchmark(SolverFactory<BGLDijkstraSVSESolverF>());
 
-  // BGL Dijkstra full search, static vertex dynamic edge
-  benchmark(SolverFactory<BGLDijkstraSVDESolver<double, boost::null_visitor>>());
-  benchmark(SolverFactory<BGLDijkstraSVDESolver<float, boost::null_visitor>>());
+  // // BGL Dijkstra full search, static vertex dynamic edge
+  // benchmark(SolverFactory<BGLDijkstraSVDESolver<double, boost::null_visitor>>());
+  // benchmark(SolverFactory<BGLDijkstraSVDESolver<float, boost::null_visitor>>());
 
-  // BGL Dijkstra early termination, static vertex, dynamic edge
-  benchmark(SolverFactory<BGLDijkstraSVDESolverD>());
-  benchmark(SolverFactory<BGLDijkstraSVDESolverF>());
+  // // BGL Dijkstra early termination, static vertex, dynamic edge
+  // benchmark(SolverFactory<BGLDijkstraSVDESolverD>());
+  // benchmark(SolverFactory<BGLDijkstraSVDESolverF>());
 
-  // BGL depth first full search, static vertex static edge
-  benchmark(SolverFactory<BGLDepthFirstSVSESolver<double, boost::null_visitor>>());
-  benchmark(SolverFactory<BGLDepthFirstSVSESolver<float, boost::null_visitor>>());
+  // // BGL depth first full search, static vertex static edge
+  // benchmark(SolverFactory<BGLDepthFirstSVSESolver<double, boost::null_visitor>>());
+  // benchmark(SolverFactory<BGLDepthFirstSVSESolver<float, boost::null_visitor>>());
 
-  // BGL depth first early termination, static vertex static edge
-  benchmark(SolverFactory<BGLDepthFirstSVSESolverD>());
-  benchmark(SolverFactory<BGLDepthFirstSVSESolverF>());
+  // // BGL depth first early termination, static vertex static edge
+  // benchmark(SolverFactory<BGLDepthFirstSVSESolverD>());
+  // benchmark(SolverFactory<BGLDepthFirstSVSESolverF>());
 
-  // BGL depth first full search, static vertex dynamic edge
-  benchmark(SolverFactory<BGLDepthFirstSVDESolver<double, boost::null_visitor>>());
-  benchmark(SolverFactory<BGLDepthFirstSVDESolver<float, boost::null_visitor>>());
+  // // BGL depth first full search, static vertex dynamic edge
+  // benchmark(SolverFactory<BGLDepthFirstSVDESolver<double, boost::null_visitor>>());
+  // benchmark(SolverFactory<BGLDepthFirstSVDESolver<float, boost::null_visitor>>());
 
-  // BGL depth first early termination, static vertex, dynamic edge
-  benchmark(SolverFactory<BGLDepthFirstSVDESolverD>());
-  benchmark(SolverFactory<BGLDepthFirstSVDESolverF>());
+  // // BGL depth first early termination, static vertex, dynamic edge
+  // benchmark(SolverFactory<BGLDepthFirstSVDESolverD>());
+  // benchmark(SolverFactory<BGLDepthFirstSVDESolverF>());
 
   return 0;
 }

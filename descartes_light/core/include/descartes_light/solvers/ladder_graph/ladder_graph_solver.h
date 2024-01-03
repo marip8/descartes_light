@@ -41,6 +41,12 @@ public:
 
   SearchResult<FloatType> search() override;
 
+  /**
+   * @brief Estimates the size of the ladder graph (megabytes)
+   * @return
+   */
+  static float estimateGraphSize(const std::size_t dof, const std::size_t n_waypoints, const std::size_t samples_per_waypoint);
+
 private:
   LadderGraph<FloatType> graph_;
   int num_threads_;
